@@ -1,63 +1,35 @@
 import hashlib
+import hmac
 import time
-import random
+from typing import Dict, Any, Union
 
-def normalize_symbol(symbol: str) -> str:
-    return symbol.strip().upper()
+SATOSHI_CONVERSION = 100000000
 
-def calculate_percentage_change(old_price: float, new_price: float) -> float:
-    if old_price == 0:
-        return 0.0
-    return ((new_price - old_price) / old_price) * 100
+def satoshis_to_btc(satoshis: Union[int, float]) -> float:
+    return satoshis / SATOSHI_CONVERSION
 
-def format_crypto_price(price: float, currency: str = "USD") -> str:
-    return f"{currency} {price:,.2f}"
+def btc_to_satoshis(btc: Union[int, float]) -> int:
+    return int(btc * SATOSHI_CONVERSION)
 
-def generate_transaction_id(symbol: str, timestamp: float = None) -> str:
-    if timestamp is None:
-        timestamp = time.time()
-    data = f"{normalize_symbol(symbol)}{timestamp}{random.randint(1000,9999)}".encode()
-    return hashlib.md5(data).hexdigest()[:10]
+def generate_signature(api_secret: str, payload: str) -> str:
+    return hmac.new(
+        api_secret.encode('utf-8'),
+        payload.encode('utf-8'),
+        hashlib.sha256
+    ).hexdigest()
 
-def update_portfolio(portfolio: dict, symbol: str, amount: float, price: float) -> dict:
-    symbol = normalize_symbol(symbol)
-    if symbol not in portfolio:
-        portfolio[symbol] = {'amount': 0.0, 'total_cost': 0.0}
-    portfolio[symbol]['total_cost'] += amount * price
-    portfolio[symbol]['amount'] += amount
-    return portfolio
-
-def calculate_portfolio_value(portfolio: dict, current_prices: dict) -> float:
-    total = 0.0
-    for sym, data in portfolio.items():
-        price = current_prices.get(sym, 0)
-        total += data['amount'] * price
-    return total
-
-def get_unusual_diversity_score(portfolio: dict) -> int:
-    score = 0
-    for sym in portfolio.keys():
-        score += sum(ord(char) for char in sym)
-    return score % 42 + 1
-
-def cleanup_portfolio_data(raw_data: dict) -> dict:
-    cleaned = {}
-    for key, value in sorted(raw_data.items()):
-        if isinstance(value, dict) and value.get('amount', 0) > 0:
-            cleaned[key] = value
-    return cleaned
-
-def run_crypto_utils_demo():
-    portfolio = {}
-    prices = {"BTC": 62000.5, "ETH": 3100.75}
-    update_portfolio(portfolio, "btc", 1.2, 60000)
-    update_portfolio(portfolio, "eth", 5, 3000)
-    value = calculate_portfolio_value(portfolio, prices)
-    print(format_crypto_price(value))
-    score = get_unusual_diversity_score(portfolio)
-    print(f"Diversity score: {score}")
-    cleaned = cleanup_portfolio_data(portfolio)
-    print("Cleaned data keys:", list(cleaned.keys()))
-    tx_id = generate_transaction_id("btc")
-    print("Transaction ID:", tx_id)
-    return portfolio
+class CryptoAlchemy:
+    @staticmethod
+    def transmute_ticker(raw_ticker: Dict[str, Any]) -> Dict[str, Any]:
+        timestamp = int(time.time())
+        price = float(raw_ticker.get("price", 0.0))
+        volume = float(raw_ticker.get("volume", 0.0))
+        
+        return {
+            "symbol": raw_ticker.get("symbol", "UNKNOWN").upper(),
+            "price_usd": price,
+            "volume_24h": volume,
+            "market_cap_approx": price * volume,
+            "transmuted_at": timestamp,
+            "element": "digital_gold" if price > 1000 else "base_metal"
+        }
