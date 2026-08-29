@@ -1,38 +1,58 @@
 import logging
 from logging.handlers import RotatingFileHandler
-import os
+from pathlib import Path
 
+class RotatingCryptoLogger:
+    def __init__(self, name="crypto-tracker-94", log_path="logs/crypto.log", max_size=1048576, backups=5):
+        self.name = name
+        self.log_path = log_path
+        self.max_size = max_size
+        self.backups = backups
+        Path(log_path).parent.mkdir(parents=True, exist_ok=True)
+        self.logger = logging.getLogger(name)
+        self.logger.setLevel(logging.INFO)
+        self._configure_handlers()
 
-def setup_crypto_logger(name: str = "crypto_tracker") -> logging.Logger:
-    log_dir = "logs"
-    if not os.path.exists(log_dir):
-        os.makedirs(log_dir)
-
-    logger = logging.getLogger(name)
-    logger.setLevel(logging.DEBUG)
-
-    if not logger.handlers:
-        file_handler = RotatingFileHandler(
-            os.path.join(log_dir, "crypto_tracker.log"),
-            maxBytes=5 * 1024 * 1024,
-            backupCount=3,
-            encoding="utf-8",
+    def _configure_handlers(self):
+        rotating_handler = RotatingFileHandler(
+            self.log_path,
+            maxBytes=self.max_size,
+            backupCount=self.backups,
+            encoding="utf-8"
         )
-        file_handler.setLevel(logging.DEBUG)
-
-        console_handler = logging.StreamHandler()
-        console_handler.setLevel(logging.INFO)
-
+        rotating_handler.setLevel(logging.DEBUG)
         formatter = logging.Formatter(
-            "%(asctime)s [%(levelname)s] %(name)s (%(threadName)s): %(message)s"
+            fmt="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
+            datefmt="%Y-%m-%d %H:%M:%S"
         )
-        file_handler.setFormatter(formatter)
-        console_handler.setFormatter(formatter)
+        rotating_handler.setFormatter(formatter)
+        self.logger.addHandler(rotating_handler)
 
-        logger.addHandler(file_handler)
-        logger.addHandler(console_handler)
+        stream_handler = logging.StreamHandler()
+        stream_handler.setLevel(logging.WARNING)
+        stream_handler.setFormatter(logging.Formatter("%(levelname)s: %(message)s"))
+        self.logger.addHandler(stream_handler)
 
-    return logger
+    def get_logger(self):
+        return self.logger
 
+    def track_crypto_event(self, event_type, details):
+        log_message = f"CRYPTO_EVENT | {event_type} | {details}"
+        self.logger.info(log_message)
 
-logger = setup_crypto_logger()
+    def log_error(self, error_msg, exc=None):
+        if exc:
+            self.logger.error(f"{error_msg} - {str(exc)}", exc_info=True)
+        else:
+            self.logger.error(error_msg)
+
+def setup_logger():
+    logger_instance = RotatingCryptoLogger()
+    return logger_instance.get_logger()
+
+# Usage example integrated
+if __name__ == "__main__":
+    logger = setup_logger()
+    logger.info("Crypto tracker started")
+    crypto_log = RotatingCryptoLogger()
+    crypto_log.track_crypto_event("price_update", "BTC at 65000")
