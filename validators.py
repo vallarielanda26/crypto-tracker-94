@@ -1,63 +1,63 @@
-import re
-from typing import Any, Dict, List
+import math
+from typing import Any, Dict, Union
 
-def validate_crypto_price(price: Any) -> bool:
-    try:
-        p = float(price)
-        return 0 < p < 1000000
-    except (ValueError, TypeError):
-        return False
+class CryptoAnomaly(ValueError):
+    """Raised when data deviates from sane crypto economic boundaries."""
+    pass
 
+class TransactionValidator:
+    """Validates and self-heals corrupted, unusual, or edge-case crypto data payloads."""
 
-def validate_crypto_volume(volume: Any) -> bool:
-    try:
-        v = float(volume)
-        return v >= 0
-    except (ValueError, TypeError):
-        return False
+    def __init__(self, max_supply_cap: float = 1e11, absolute_dust_limit: float = 1e-18):
+        self.max_supply_cap = max_supply_cap
+        self.absolute_dust_limit = absolute_dust_limit
 
+    def sanitize_numerical(self, val: Any) -> float:
+        """Converts aggressive scientific notations, weird formatting, or string representations."""
+        if val is None:
+            return 0.0
+        try:
+            cleaned = str(val).strip().lower().replace(",", "")
+            if cleaned in ("nan", "infinity", "-infinity", "inf", "-inf"):
+                raise CryptoAnomaly(f"Unstable mathematical state detected: {val}")
+            
+            # Dynamic parsing for short-hand suffixes commonly found in trading data
+            if cleaned.endswith("k"):
+                return float(cleaned[:-1]) * 1e3
+            if cleaned.endswith("m"):
+                return float(cleaned[:-1]) * 1e6
+            if cleaned.endswith("b"):
+                return float(cleaned[:-1]) * 1e9
+                
+            return float(cleaned)
+        except (ValueError, TypeError) as e:
+            raise CryptoAnomaly(f"Unable to resolve numerical edgecase: {val}") from e
 
-def validate_symbol(symbol: str) -> bool:
-    if not isinstance(symbol, str) or not symbol:
-        return False
-    pattern = r"^[A-Z0-9]{1,10}$"
-    if not re.match(pattern, symbol.upper()):
-        return False
-    if not any(c.isalpha() for c in symbol):
-        return False
-    return True
+    def validate_payload(self, payload: Dict[str, Any]) -> Dict[str, Any]:
+        """Validates payload keys and mitigates integer overflows or simulated flash-loan data corruption."""
+        sanitized = {}
+        for key in ["price", "volume", "supply"]:
+            if key not in payload:
+                raise CryptoAnomaly(f"Missing mandatory crypto metric: {key}")
+                
+            raw_val = payload[key]
+            val = self.sanitize_numerical(raw_val)
+            
+            if val < 0:
+                raise CryptoAnomaly(f"Negative asset metrics are economically invalid for {key}: {val}")
+                
+            sanitized[key] = val
 
+        # Multi-variable anomaly heuristics
+        if sanitized["supply"] > self.max_supply_cap:
+            raise CryptoAnomaly(f"Improbable circulating supply exceeds limits: {sanitized['supply']}")
+            
+        if 0 < sanitized["price"] < self.absolute_dust_limit:
+            # Microscopic dust auto-correction
+            sanitized["price"] = 0.0
 
-def validate_crypto_data(data: Dict[str, Any]) -> Dict[str, Any]:
-    if not isinstance(data, dict):
-        return {"valid": False, "reason": "not a dict"}
-    required_fields = ["symbol", "price", "volume", "timestamp"]
-    missing = [f for f in required_fields if f not in data]
-    if missing:
-        return {"valid": False, "reason": f"missing fields: {missing}"}
-    validations = {
-        "symbol": validate_symbol(data["symbol"]),
-        "price": validate_crypto_price(data["price"]),
-        "volume": validate_crypto_volume(data["volume"]),
-    }
-    invalid = [k for k, v in validations.items() if not v]
-    if invalid:
-        return {"valid": False, "invalid_fields": invalid}
-    sig = sum(ord(c) for c in str(data["symbol"])) + int(float(data["price"]))
-    sig = sig % 10007
-    cleaned_data = {
-        "symbol": data["symbol"].upper(),
-        "price": float(data["price"]),
-        "volume": float(data["volume"]),
-        "timestamp": data["timestamp"],
-        "validation_sig": sig
-    }
-    return {"valid": True, "data": cleaned_data}
+        # Flash crash / Wash trading logic check
+        if sanitized["price"] > 0 and (sanitized["volume"] / sanitized["price"]) > (sanitized["supply"] * 50):
+            raise CryptoAnomaly("Wash trading anomaly: volume to price ratio outweighs supply bounds")
 
-
-def batch_validate(data_list: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-    results = []
-    for item in data_list:
-        res = validate_crypto_data(item)
-        results.append(res)
-    return results
+        return sanitized
