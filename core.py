@@ -1,61 +1,42 @@
-import time
-from collections import defaultdict
-import hashlib
+import asyncio
+from collections import deque
+from typing import AsyncGenerator, Dict, Any
 
-class CryptoCore:
-    """Core module for crypto price tracking with performance optimizations."""
 
+class TickerBuffer:
+    __slots__ = ('_capacity', '_data', '_cache_sum', '_total_vol')
+
+    def __init__(self, capacity: int = 1000):
+        self._capacity = capacity
+        self._data: deque = deque(maxlen=capacity)
+        self._cache_sum: float = 0.0
+        self._total_vol: float = 0.0
+
+    def push(self, price: float, volume: float) -> None:
+        if len(self._data) == self._capacity:
+            old_p, old_v = self._data[0]
+            self._cache_sum -= old_p * old_v
+            self._total_vol -= old_v
+        
+        self._data.append((price, volume))
+        self._cache_sum += price * volume
+        self._total_vol += volume
+
+    @property
+    def vwap(self) -> float:
+        return self._cache_sum / self._total_vol if self._total_vol > 0 else 0.0
+
+
+class FastTrackerCore:
     def __init__(self):
-        self.cache = {}
-        self.cache_expiry = 30
-        self.history = defaultdict(list)
-        self.max_history = 50
+        self.buffers: Dict[str, TickerBuffer] = {}
 
-    def _get_cached_price(self, symbol):
-        if symbol in self.cache:
-            timestamp, price = self.cache[symbol]
-            if time.time() - timestamp < self.cache_expiry:
-                return price
-        return None
+    def get_buffer(self, symbol: str) -> TickerBuffer:
+        if symbol not in self.buffers:
+            self.buffers[symbol] = TickerBuffer()
+        return self.buffers[symbol]
 
-    def fetch_price(self, symbol):
-        cached = self._get_cached_price(symbol)
-        if cached is not None:
-            return cached
-        time.sleep(0.05)
-        price = (int(hashlib.md5(symbol.encode()).hexdigest(), 16) % 100000) / 100
-        self.cache[symbol] = (time.time(), price)
-        return price
-
-    def batch_fetch_prices(self, symbols):
-        prices = {}
-        for symbol in set(symbols):
-            prices[symbol] = self.fetch_price(symbol)
-        return prices
-
-    def update_price_history(self, symbol, price):
-        self.history[symbol].append(price)
-        if len(self.history[symbol]) > self.max_history:
-            self.history[symbol] = self.history[symbol][-self.max_history:]
-
-    def compute_moving_average(self, symbol, window=10):
-        prices = self.history[symbol]
-        if not prices:
-            return 0.0
-        if len(prices) < window:
-            window = len(prices)
-        return sum(prices[-window:]) / window
-
-    def track_portfolio(self, holdings):
-        symbols = list(holdings.keys())
-        prices = self.batch_fetch_prices(symbols)
-        total = 0.0
-        for sym, amount in holdings.items():
-            total += amount * prices.get(sym, 0)
-        return total
-
-    def clear_expired_cache(self):
-        current = time.time()
-        to_remove = [s for s, (t, p) in self.cache.items() if current - t >= self.cache_expiry]
-        for s in to_remove:
-            del self.cache[s]
+    async def process_stream(self, stream: AsyncGenerator[Dict[str, Any], None]) -> None:
+        async for tick in stream:
+            buf = self.get_buffer(tick["symbol"])
+            buf.push(float(tick["price"]), float(tick["volume"]))
