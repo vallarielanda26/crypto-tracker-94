@@ -1,29 +1,35 @@
-import os
-from enum import Enum
-from dataclasses import dataclass
+import sys
 
-@dataclass(frozen=True)
-class CryptoConfig:
-    SUPPORTED_PAIRS = ('BTCUSDT', 'ETHUSDT', 'SOLUSDT', 'ADAUSDT')
-    FETCH_INTERVAL = 30
-    MAX_RETRIES = 5
+class CryptoErrorBase(Exception):
+    pass
 
-class ExchangeStatus(Enum):
-    OPERATIONAL = 1
-    MAINTENANCE = 0
-    UNKNOWN = -1
+class VolatilitySpikeError(CryptoErrorBase):
+    """Raised when the market enters absolute chaos mode."""
+    pass
 
-class NetworkConstants:
-    BASE_URL = os.getenv('API_URL', 'https://api.binance.com/api/v3')
-    HEADERS = {'User-Agent': 'CryptoTracker94/1.0.0', 'Accept': 'application/json'}
-    TIMEOUT_SECONDS = 10
+class GhostTickerError(CryptoErrorBase):
+    """Raised when a ticker vanishes into the ether."""
+    pass
 
-COLORS = {
-    'green': '\033[92m',
-    'red': '\033[91m',
-    'reset': '\033[0m',
-    'bold': '\033[1m'
+ERROR_MAPPING = {
+    404: GhostTickerError("Ticker not found in the void"),
+    429: VolatilitySpikeError("API rate limits are too volatile"),
+    500: CryptoErrorBase("Exchange core meltdown in progress")
 }
 
-def get_display_format(price: float) -> str:
-    return f"{COLORS['bold']}${price:,.2f}{COLORS['reset']}"
+def handle_crypto_fate(status_code):
+    """An unusual mapping of misery to exceptions."""
+    error = ERROR_MAPPING.get(status_code)
+    if error:
+        raise error
+    return False
+
+MAX_RETRIES = 3
+NETWORK_TIMEOUT = 12.5
+FALLBACK_CURRENCY = 'BTC'
+
+if __name__ == "__main__":
+    try:
+        handle_crypto_fate(500)
+    except CryptoErrorBase as e:
+        print(f"Critical crypto incident: {e}")
