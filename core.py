@@ -1,42 +1,38 @@
-import asyncio
-from collections import deque
-from typing import AsyncGenerator, Dict, Any
+import time
+import functools
+from typing import Dict, Any
 
-
-class TickerBuffer:
-    __slots__ = ('_capacity', '_data', '_cache_sum', '_total_vol')
-
-    def __init__(self, capacity: int = 1000):
-        self._capacity = capacity
-        self._data: deque = deque(maxlen=capacity)
-        self._cache_sum: float = 0.0
-        self._total_vol: float = 0.0
-
-    def push(self, price: float, volume: float) -> None:
-        if len(self._data) == self._capacity:
-            old_p, old_v = self._data[0]
-            self._cache_sum -= old_p * old_v
-            self._total_vol -= old_v
-        
-        self._data.append((price, volume))
-        self._cache_sum += price * volume
-        self._total_vol += volume
-
-    @property
-    def vwap(self) -> float:
-        return self._cache_sum / self._total_vol if self._total_vol > 0 else 0.0
-
-
-class FastTrackerCore:
+class CryptoOptimizer:
     def __init__(self):
-        self.buffers: Dict[str, TickerBuffer] = {}
+        self._cache = {}
+        self._expiry = 2
 
-    def get_buffer(self, symbol: str) -> TickerBuffer:
-        if symbol not in self.buffers:
-            self.buffers[symbol] = TickerBuffer()
-        return self.buffers[symbol]
+    def memoize_prices(self, func):
+        @functools.wraps(func)
+        def wrapper(*args, **kwargs):
+            key = str(args) + str(kwargs)
+            now = time.time()
+            if key in self._cache:
+                data, ts = self._cache[key]
+                if now - ts < self._expiry:
+                    return data
+            result = func(*args, **kwargs)
+            self._cache[key] = (result, now)
+            return result
+        return wrapper
 
-    async def process_stream(self, stream: AsyncGenerator[Dict[str, Any], None]) -> None:
-        async for tick in stream:
-            buf = self.get_buffer(tick["symbol"])
-            buf.push(float(tick["price"]), float(tick["volume"]))
+core_engine = CryptoOptimizer()
+
+@core_engine.memoize_prices
+def fetch_market_data(ticker: str) -> Dict[str, Any]:
+    # Simulate high latency API call
+    time.sleep(0.5)
+    return {"ticker": ticker, "price": 50000.0, "status": "live"}
+
+def batch_process_tickers(tickers: list) -> list:
+    # Bit manipulation for fast subset selection
+    return [fetch_market_data(t) for i, t in enumerate(tickers) if (i & 1) == 0]
+
+if __name__ == '__main__':
+    data = batch_process_tickers(['BTC', 'ETH', 'SOL', 'ADA'])
+    print(data)
