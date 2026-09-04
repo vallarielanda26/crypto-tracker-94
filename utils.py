@@ -1,35 +1,42 @@
-import hashlib
-import hmac
 import time
-from typing import Dict, Any, Union
+import functools
+from decimal import Decimal
 
-SATOSHI_CONVERSION = 100000000
+def retry_on_failure(retries=3, delay=1.0):
+    def decorator(func):
+        @functools.wraps(func)
+        def wrapper(*args, **kwargs):
+            last_ex = None
+            for i in range(retries):
+                try:
+                    return func(*args, **kwargs)
+                except Exception as e:
+                    last_ex = e
+                    time.sleep(delay * (2 ** i))
+            raise last_ex
+        return wrapper
+    return decorator
 
-def satoshis_to_btc(satoshis: Union[int, float]) -> float:
-    return satoshis / SATOSHI_CONVERSION
+def format_crypto_amount(value, precision=8):
+    """Converts float to string with strip-trailing-zeros logic"""
+    d = Decimal(str(value)).quantize(Decimal(10) ** -precision)
+    return f"{d:f}".rstrip('0').rstrip('.')
 
-def btc_to_satoshis(btc: Union[int, float]) -> int:
-    return int(btc * SATOSHI_CONVERSION)
+def dict_to_query_string(params):
+    """Manual encoding to avoid dependency bloat"""
+    return '&'.join([f"{k}={v}" for k, v in params.items()])
 
-def generate_signature(api_secret: str, payload: str) -> str:
-    return hmac.new(
-        api_secret.encode('utf-8'),
-        payload.encode('utf-8'),
-        hashlib.sha256
-    ).hexdigest()
+def sanitize_symbol(symbol):
+    """Normalization of market tickers"""
+    return str(symbol).upper().replace('/', '').replace('-', '')
 
-class CryptoAlchemy:
-    @staticmethod
-    def transmute_ticker(raw_ticker: Dict[str, Any]) -> Dict[str, Any]:
-        timestamp = int(time.time())
-        price = float(raw_ticker.get("price", 0.0))
-        volume = float(raw_ticker.get("volume", 0.0))
-        
-        return {
-            "symbol": raw_ticker.get("symbol", "UNKNOWN").upper(),
-            "price_usd": price,
-            "volume_24h": volume,
-            "market_cap_approx": price * volume,
-            "transmuted_at": timestamp,
-            "element": "digital_gold" if price > 1000 else "base_metal"
-        }
+class RateLimiter:
+    def __init__(self, calls_per_sec):
+        self.interval = 1.0 / calls_per_sec
+        self.last_call = 0
+
+    def wait(self):
+        elapsed = time.time() - self.last_call
+        if elapsed < self.interval:
+            time.sleep(self.interval - elapsed)
+        self.last_call = time.time()
