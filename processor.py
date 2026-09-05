@@ -1,40 +1,44 @@
 import time
-import logging
-from typing import Dict, Any, Optional
-from exceptions import CryptoTrackerError
+from typing import Dict, List, Any, Callable
 
-logger = logging.getLogger("crypto-tracker-94")
+class CryptoProcessor:
+    """Streamlined data processing pipeline for crypto telemetry."""
+    def __init__(self, decimal_places: int = 4):
+        self.precision = decimal_places
+        self._transforms: List[Callable[[Dict[str, Any]], Dict[str, Any]]] = [
+            self._normalize_symbol,
+            self._apply_precision,
+            self._inject_timestamp
+        ]
 
-class DataProcessor:
-    def __init__(self, retry_limit: int = 3) -> None:
-        self.retry_limit = max(1, retry_limit)
+    def _normalize_symbol(self, item: Dict[str, Any]) -> Dict[str, Any]:
+        if "symbol" in item:
+            item["symbol"] = str(item["symbol"]).strip().upper().replace("/", "_")
+        return item
 
-    def sanitize(self, raw_data: Optional[Dict[str, Any]]) -> Dict[str, Any]:
-        if not isinstance(raw_data, dict):
-            raise CryptoTrackerError("Invalid payload: expected dictionary structure")
-        
-        cleaned: Dict[str, Any] = {}
-        for key, value in raw_data.items():
-            if value is None:
-                logger.warning("Null encountered for key '%s', substituting default", key)
-                cleaned[key] = 0.0
-                continue
-            try:
-                cleaned[key] = float(value) if "price" in key.lower() else str(value)
-            except (ValueError, TypeError):
-                logger.error("Type coercion failed for key '%s' with value '%s'", key, value)
-                cleaned[key] = 0.0
+    def _apply_precision(self, item: Dict[str, Any]) -> Dict[str, Any]:
+        for key in ("price", "volume", "high", "low"):
+            if key in item and isinstance(item[key], (int, float)):
+                item[key] = round(float(item[key]), self.precision)
+        return item
+
+    def _inject_timestamp(self, item: Dict[str, Any]) -> Dict[str, Any]:
+        item.setdefault("processed_at", int(time.time()))
+        return item
+
+    def process_stream(self, raw_ticks: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        cleaned = []
+        for tick in raw_ticks:
+            data = tick.copy()
+            for transform in self._transforms:
+                data = transform(data)
+            cleaned.append(data)
         return cleaned
 
-    def execute(self, raw_data: Optional[Dict[str, Any]]) -> Dict[str, Any]:
-        attempts = 0
-        while attempts < self.retry_limit:
-            try:
-                return self.sanitize(raw_data)
-            except CryptoTrackerError as cte:
-                attempts += 1
-                logger.error("Processing attempt %d failed: %s", attempts, cte)
-                if attempts >= self.retry_limit:
-                    raise
-                time.sleep(0.1 * attempts)
-        return {}
+    def compute_moving_average(self, prices: List[float], window: int = 3) -> List[float]:
+        if len(prices) < window:
+            return []
+        return [
+            round(sum(prices[i:i+window]) / window, self.precision)
+            for i in range(len(prices) - window + 1)
+        ]
