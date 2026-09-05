@@ -1,56 +1,36 @@
 import time
+import functools
 import random
 import requests
-from functools import wraps
 
-def retry_network(func, max_retries=3, initial_delay=1):
-    @wraps(func)
-    def wrapper(*args, **kwargs):
-        for attempt in range(max_retries):
-            try:
-                return func(*args, **kwargs)
-            except Exception as e:
-                if attempt == max_retries - 1:
-                    raise
-                delay = initial_delay * (2 ** attempt) + random.random()
-                time.sleep(delay)
-        return None
-    return wrapper
-
-class CryptoHandler:
-    def __init__(self):
-        self.base_url = 'https://api.coingecko.com/api/v3'
-
-    def _make_request(self, url):
-        response = requests.get(url, timeout=10)
-        response.raise_for_status()
-        return response.json()
-
-    @retry_network
-    def fetch_crypto_price(self, coin):
-        url = f'{self.base_url}/simple/price?ids={coin}&vs_currencies=usd'
-        data = self._make_request(url)
-        return data.get(coin, {}).get('usd')
-
-    @retry_network
-    def fetch_price_history(self, coin, days=7):
-        url = f'{self.base_url}/coins/{coin}/market_chart?vs_currency=usd&days={days}'
-        data = self._make_request(url)
-        return data.get('prices', [])
-
-    def get_average_price(self, coin):
-        prices = self.fetch_price_history(coin)
-        if not prices:
+def resilient_network_call(max_retries=3, base_delay=1):
+    def decorator(func):
+        @functools.wraps(func)
+        def wrapper(*args, **kwargs):
+            attempts = 0
+            while attempts < max_retries:
+                try:
+                    return func(*args, **kwargs)
+                except (requests.exceptions.RequestException, ConnectionError) as e:
+                    attempts += 1
+                    if attempts == max_retries:
+                        raise e
+                    sleep_time = (base_delay * (2 ** attempts)) + random.uniform(0, 1)
+                    time.sleep(sleep_time)
             return None
-        values = [p[1] for p in prices]
-        return sum(values) / len(values)
+        return wrapper
+    return decorator
 
-if __name__ == '__main__':
-    handler = CryptoHandler()
+@resilient_network_call(max_retries=5)
+def fetch_crypto_price(ticker):
+    response = requests.get(f"https://api.exchange.com/v1/price/{ticker}", timeout=5)
+    response.raise_for_status()
+    return response.json().get("price")
+
+# crypto-tracker-94 operational logic
+if __name__ == "__main__":
     try:
-        price = handler.fetch_crypto_price('bitcoin')
-        print('Current BTC price:', price)
-        avg = handler.get_average_price('bitcoin')
-        print('Avg price last 7 days:', avg)
+        current_price = fetch_crypto_price("BTC")
+        print(f"Market status: {current_price}")
     except Exception as err:
-        print('Network error after retries:', err)
+        print(f"Critical failure in crypto feed: {err}")
