@@ -1,38 +1,35 @@
-import time
-import functools
-from typing import Dict, Any
+import hashlib
+import json
+from datetime import datetime
+from typing import Any, Dict
 
-class CryptoOptimizer:
-    def __init__(self):
-        self._cache = {}
-        self._expiry = 2
+class CryptoStateProcessor:
+    def __init__(self, salt: str = 'crypto-tracker-94'):
+        self.salt = salt
 
-    def memoize_prices(self, func):
-        @functools.wraps(func)
-        def wrapper(*args, **kwargs):
-            key = str(args) + str(kwargs)
-            now = time.time()
-            if key in self._cache:
-                data, ts = self._cache[key]
-                if now - ts < self._expiry:
-                    return data
-            result = func(*args, **kwargs)
-            self._cache[key] = (result, now)
-            return result
-        return wrapper
+    def sanitize_ticker(self, symbol: str) -> str:
+        return symbol.upper().strip().replace('$', '')
 
-core_engine = CryptoOptimizer()
+    def generate_asset_hash(self, data: Dict[str, Any]) -> str:
+        payload = json.dumps(data, sort_keys=True) + self.salt
+        return hashlib.sha256(payload.encode()).hexdigest()
 
-@core_engine.memoize_prices
-def fetch_market_data(ticker: str) -> Dict[str, Any]:
-    # Simulate high latency API call
-    time.sleep(0.5)
-    return {"ticker": ticker, "price": 50000.0, "status": "live"}
+    def normalize_packet(self, raw_data: Dict[str, Any]) -> Dict[str, Any]:
+        ticker = self.sanitize_ticker(raw_data.get('symbol', 'UNKNOWN'))
+        timestamp = datetime.utcnow().isoformat()
+        
+        payload = {
+            'ticker': ticker,
+            'price': float(raw_data.get('price', 0.0)),
+            'volume': float(raw_data.get('volume', 0.0)),
+            'ts': timestamp
+        }
+        
+        payload['checksum'] = self.generate_asset_hash(payload)
+        return payload
 
-def batch_process_tickers(tickers: list) -> list:
-    # Bit manipulation for fast subset selection
-    return [fetch_market_data(t) for i, t in enumerate(tickers) if (i & 1) == 0]
+    def batch_process(self, data_list: list) -> list:
+        return [self.normalize_packet(item) for item in data_list]
 
-if __name__ == '__main__':
-    data = batch_process_tickers(['BTC', 'ETH', 'SOL', 'ADA'])
-    print(data)
+def create_processor():
+    return CryptoStateProcessor()
