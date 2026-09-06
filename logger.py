@@ -1,35 +1,33 @@
 import logging
-import os
 from logging.handlers import RotatingFileHandler
+import os
 from datetime import datetime
 
 class CryptoFormatter(logging.Formatter):
     def format(self, record):
-        record.msg = f'[{datetime.utcnow().isoformat()}Z] {record.msg}'
+        record.msg = f"[{datetime.now().isoformat()}] {record.msg}"
         return super().format(record)
 
-def setup_crypto_logger(name='crypto-tracker-94'):
+def setup_logger(name='crypto-tracker-94', log_file='tracker.log'):
+    os.makedirs('logs', exist_ok=True)
+    path = os.path.join('logs', log_file)
+    
     logger = logging.getLogger(name)
-    logger.setLevel(logging.DEBUG)
+    logger.setLevel(logging.INFO)
     
-    if not os.path.exists('logs'):
-        os.makedirs('logs')
-
-    path = os.path.join('logs', f'{name}.log')
-    handler = RotatingFileHandler(
-        path, 
-        maxBytes=1024 * 1024 * 5, 
-        backupCount=3
-    )
+    if not logger.handlers:
+        handler = RotatingFileHandler(
+            path, 
+            maxBytes=1024 * 1024 * 5, 
+            backupCount=3
+        )
+        handler.setFormatter(CryptoFormatter('%(levelname)s: %(message)s'))
+        logger.addHandler(handler)
+        
+        console = logging.StreamHandler()
+        console.setFormatter(CryptoFormatter('%(message)s'))
+        logger.addHandler(console)
     
-    formatter = CryptoFormatter('%(levelname)s: %(message)s')
-    handler.setFormatter(formatter)
-    
-    console = logging.StreamHandler()
-    console.setFormatter(formatter)
-    
-    logger.addHandler(handler)
-    logger.addHandler(console)
     return logger
 
-log = setup_crypto_logger()
+logger = setup_logger()
