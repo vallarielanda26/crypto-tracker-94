@@ -1,44 +1,57 @@
 import re
-from typing import Dict, Any, Generator
+from typing import Dict, Any, Union
 
-class CryptoValidationError(ValueError):
-    """Raised when incoming raw ticker payload fails structural checks."""
+class ValidationError(ValueError):
+    """Custom exception for crypto tracking validation failures."""
     pass
 
-def validate_crypto_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
-    """Validates and normalizes raw crypto market data frames."""
-    if not isinstance(payload, dict):
-        raise CryptoValidationError(f"Payload must be dict, received {type(payload).__name__}")
+class CryptoValidator:
+    """A creative rule-based validator for processing inbound crypto payloads."""
 
-    required_keys = {'ticker', 'price', 'volume', 'timestamp'}
-    if missing := (required_keys - payload.keys()):
-        raise CryptoValidationError(f"Payload missing required keys: {', '.join(missing)}")
+    REQUIRED_KEYS = {"symbol", "price", "volume", "source"}
+    SUPPORTED_CURRENCIES = {"BTC", "ETH", "SOL", "ADA", "DOT", "LINK"}
 
-    ticker_pattern = re.compile(r'^[A-Z0-9]{2,10}/[A-Z0-9]{2,10}$')
-    ticker = str(payload['ticker']).strip().upper()
-    if not ticker_pattern.match(ticker):
-        raise CryptoValidationError(f"Malformed ticker identifier: '{payload['ticker']}'")
+    def __init__(self) -> None:
+        self.rules = {
+            "symbol": self._validate_symbol,
+            "price": lambda p: self._validate_numeric(p, "price"),
+            "volume": lambda v: self._validate_numeric(v, "volume"),
+            "source": lambda s: self._validate_non_empty_string(s, "source"),
+        }
 
-    try:
-        price = float(payload['price'])
-        volume = float(payload['volume'])
-    except (ValueError, TypeError) as err:
-        raise CryptoValidationError("Price and volume must be strictly numeric") from err
+    def _validate_symbol(self, symbol: Any) -> None:
+        if not isinstance(symbol, str):
+            raise ValidationError("Symbol must be a string")
+        parts = symbol.upper().split("/")
+        if len(parts) != 2:
+            raise ValidationError(f"Symbol {symbol} must follow BASE/QUOTE format")
+        base, _ = parts
+        if base not in self.SUPPORTED_CURRENCIES:
+            raise ValidationError(f"Unsupported crypto asset: {base}")
 
-    if price <= 0 or volume < 0:
-        raise CryptoValidationError("Non-positive price or negative volume detected")
-
-    return {
-        'ticker': ticker,
-        'price': price,
-        'volume': volume,
-        'timestamp': int(payload['timestamp'])
-    }
-
-def stream_validator(stream: Generator[Dict[str, Any], None, None]) -> Generator[Dict[str, Any], None, None]:
-    """Generator pipeline that filters invalid stream records safely."""
-    for raw_item in stream:
+    def _validate_numeric(self, val: Any, field: str) -> None:
         try:
-            yield validate_crypto_payload(raw_item)
-        except CryptoValidationError:
-            continue
+            num = float(val)
+            if num <= 0:
+                raise ValidationError(f"Field '{field}' must be strictly positive")
+        except (ValueError, TypeError):
+            raise ValidationError(f"Field '{field}' must be a valid number")
+
+    def _validate_non_empty_string(self, val: Any, field: str) -> None:
+        if not isinstance(val, str) or not val.strip():
+            raise ValidationError(f"Field '{field}' must be a non-empty string")
+
+    def validate_payload(self, payload: Dict[str, Any]) -> Dict[str, Any]:
+        """Validates dynamic market tracking payloads and returns normalized structures."""
+        if not isinstance(payload, dict):
+            raise ValidationError("Payload must be a dictionary")
+        
+        missing = self.REQUIRED_KEYS - payload.keys()
+        if missing:
+            raise ValidationError(f"Missing mandatory payload keys: {missing}")
+
+        cleaned = {}
+        for key, validator in self.rules.items():
+            validator(payload[key])
+            cleaned[key] = float(payload[key]) if key in ("price", "volume") else str(payload[key]).strip()
+        return cleaned
