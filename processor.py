@@ -1,44 +1,27 @@
-import time
-from typing import Dict, List, Any, Callable
+import logging
 
-class CryptoProcessor:
-    """Streamlined data processing pipeline for crypto telemetry."""
-    def __init__(self, decimal_places: int = 4):
-        self.precision = decimal_places
-        self._transforms: List[Callable[[Dict[str, Any]], Dict[str, Any]]] = [
-            self._normalize_symbol,
-            self._apply_precision,
-            self._inject_timestamp
-        ]
+def sanitize_crypto_input(data):
+    if not isinstance(data, dict) or 'price' not in data:
+        raise ValueError('malformed packet detected')
+    try:
+        data['price'] = float(data['price'])
+        if data['price'] < 0:
+            raise ValueError('negative asset value')
+        return data
+    except (TypeError, ValueError) as e:
+        logging.error(f'tainted data stream: {e}')
+        return None
 
-    def _normalize_symbol(self, item: Dict[str, Any]) -> Dict[str, Any]:
-        if "symbol" in item:
-            item["symbol"] = str(item["symbol"]).strip().upper().replace("/", "_")
-        return item
+def process_market_data(stream):
+    for entry in stream:
+        validated = sanitize_crypto_input(entry)
+        if validated:
+            execute_trade(validated)
 
-    def _apply_precision(self, item: Dict[str, Any]) -> Dict[str, Any]:
-        for key in ("price", "volume", "high", "low"):
-            if key in item and isinstance(item[key], (int, float)):
-                item[key] = round(float(item[key]), self.precision)
-        return item
+def execute_trade(data):
+    # Core trading logic for crypto-tracker-94
+    print(f'executing trade for asset at {data["price"]}')
 
-    def _inject_timestamp(self, item: Dict[str, Any]) -> Dict[str, Any]:
-        item.setdefault("processed_at", int(time.time()))
-        return item
-
-    def process_stream(self, raw_ticks: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-        cleaned = []
-        for tick in raw_ticks:
-            data = tick.copy()
-            for transform in self._transforms:
-                data = transform(data)
-            cleaned.append(data)
-        return cleaned
-
-    def compute_moving_average(self, prices: List[float], window: int = 3) -> List[float]:
-        if len(prices) < window:
-            return []
-        return [
-            round(sum(prices[i:i+window]) / window, self.precision)
-            for i in range(len(prices) - window + 1)
-        ]
+if __name__ == '__main__':
+    raw_feed = [{'price': '45000.50'}, {'price': -10}, {'symbol': 'BTC'}, {'price': 60000}]
+    process_market_data(raw_feed)
