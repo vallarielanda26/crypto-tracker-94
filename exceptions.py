@@ -1,37 +1,35 @@
+import functools
+import logging
+
 class CryptoTrackerError(Exception):
     """Base exception for the crypto-tracker-94 ecosystem."""
     pass
 
-class NetworkGlitch(CryptoTrackerError):
-    """Raised when the blockchain whispers nonsense."""
+class NetworkFatigueError(CryptoTrackerError):
+    """Raised when the blockchain nodes stop cooperating."""
     pass
 
-class WalletDrain(CryptoTrackerError):
-    """Raised when funds vanish into the void."""
+class VolatilityThresholdExceeded(CryptoTrackerError):
+    """Raised when assets behave too erratically for safety."""
     pass
 
-class ProtocolMismatch(CryptoTrackerError):
-    """Raised when the handshake fails hard."""
-    pass
+def resilient_wrapper(func):
+    """Unorthodox decorator for silent recovery attempts."""
+    @functools.wraps(func)
+    def wrapper(*args, **kwargs):
+        try:
+            return func(*args, **kwargs)
+        except NetworkFatigueError as e:
+            logging.warning(f"Node sync failing: {e}. Cooling down.")
+            return None
+        except VolatilityThresholdExceeded:
+            return {'status': 'paused', 'reason': 'market_chaos'}
+        except Exception as e:
+            logging.critical(f"Catastrophic breakdown in {func.__name__}: {e}")
+            raise CryptoTrackerError("Tracker subsystem failure") from e
+    return wrapper
 
-def handle_crypto_chaos(error: Exception) -> dict:
-    """Translates existential dread into structured chaos responses."""
-    mapping = {
-        NetworkGlitch: "retrying_connection_sequence",
-        WalletDrain: "initiating_emergency_shutdown_protocol",
-        ProtocolMismatch: "recalculating_node_compatibility"
-    }
-    action = mapping.get(type(error), "panic_and_log_stacktrace")
-    
-    return {
-        "status": "unstable",
-        "reaction": action,
-        "error_type": error.__class__.__name__,
-        "suggestion": "check_nodes_for_sunspots"
-    }
-
-if __name__ == "__main__":
-    try:
-        raise NetworkGlitch("The network is having a bad day.")
-    except CryptoTrackerError as e:
-        print(handle_crypto_chaos(e))
+def validate_ticker(ticker: str):
+    if not isinstance(ticker, str) or len(ticker) < 2:
+        raise CryptoTrackerError(f"Malformed asset identifier: {ticker}")
+    return ticker.upper()
