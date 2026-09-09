@@ -2,46 +2,52 @@
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
-crypto-tracker-94 is a lightweight Python command-line tool that monitors live cryptocurrency prices and calculates portfolio value in real time. It pulls data from public APIs and delivers price alerts directly in the terminal.
+`crypto-tracker-94` is a lightweight Python library and CLI tool designed for real-time tracking of cryptocurrency prices, market caps, and volume metrics via the CoinGecko API. It allows developers and traders to monitor custom coin watchlists and trigger asynchronous threshold alerts directly within their terminal or python applications.
 
 ## Features
-- Fetches real-time prices for 200+ assets via the CoinGecko API
-- Calculates total portfolio value using user-defined holdings in JSON format
-- Supports threshold-based price alerts with desktop notifications
-- Displays 24-hour price changes and basic performance metrics
+
+- **Asynchronous Data Fetching:** Query spot prices and 24-hour volume for 500+ assets simultaneously with minimal latency using `httpx`.
+- **Custom Threshold Alerts:** Set price and percentage-change triggers that log to stdout or push notifications to Discord webhooks.
+- **Portfolio P&L Tracking:** Calculate unrealized profit and loss across custom wallet holdings with historical CSV exports.
+- **Zero-Config CLI:** Instantly inspect market conditions using simple terminal flags without writing code.
 
 ## Installation
 
+Clone the repository and install the dependencies using `pip`:
+
 ```bash
-git clone https://github.com/developer/crypto-tracker-94.git
+git clone https://github.com/Developer/crypto-tracker-94.git
 cd crypto-tracker-94
 pip install -r requirements.txt
 ```
 
-## Usage
+## Quick Start
 
-Create a `portfolio.json` file:
+### Python API
 
-```json
-{
-  "BTC": 0.25,
-  "ETH": 1.8,
-  "SOL": 12
-}
+```python
+from crypto_tracker import Tracker
+
+# Initialize tracker with base currency
+tracker = Tracker(currency="usd")
+
+# Fetch current prices
+data = tracker.get_spot_price(["bitcoin", "ethereum"])
+print(f"BTC: ${data['bitcoin']['price']:,} ({data['bitcoin']['change_24h']:+.2f}%)")
+
+# Set an automated price alert
+tracker.add_alert(asset="ethereum", target_price=3500.00, direction="above")
+tracker.listen(interval_seconds=30)
 ```
 
-Run the tracker:
+### Command Line Interface
+
+Check asset prices directly from your shell:
 
 ```bash
-python main.py --portfolio portfolio.json
-```
-
-Set a price alert:
-
-```bash
-python main.py --alert BTC 68000
+python -m crypto_tracker --coins bitcoin,solana,cardano --currency usd
 ```
 
 ## License
 
-MIT License
+This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
