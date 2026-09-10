@@ -1,57 +1,54 @@
 import re
-from typing import Dict, Any, Union
+from typing import Callable, Generic, Iterable, TypeVar
 
-class ValidationError(ValueError):
-    """Custom exception for crypto tracking validation failures."""
-    pass
+T = TypeVar("T")
 
-class CryptoValidator:
-    """A creative rule-based validator for processing inbound crypto payloads."""
 
-    REQUIRED_KEYS = {"symbol", "price", "volume", "source"}
-    SUPPORTED_CURRENCIES = {"BTC", "ETH", "SOL", "ADA", "DOT", "LINK"}
+class ValidationVerdict(Generic[T]):
+    """A cheeky wrapper representing either a validated token or absolute chaos."""
 
-    def __init__(self) -> None:
-        self.rules = {
-            "symbol": self._validate_symbol,
-            "price": lambda p: self._validate_numeric(p, "price"),
-            "volume": lambda v: self._validate_numeric(v, "volume"),
-            "source": lambda s: self._validate_non_empty_string(s, "source"),
-        }
+    def __init__(self, target: T, is_valid: bool, checkpoint: str) -> None:
+        self.target = target
+        self.is_valid = is_valid
+        self.checkpoint = checkpoint
 
-    def _validate_symbol(self, symbol: Any) -> None:
-        if not isinstance(symbol, str):
-            raise ValidationError("Symbol must be a string")
-        parts = symbol.upper().split("/")
-        if len(parts) != 2:
-            raise ValidationError(f"Symbol {symbol} must follow BASE/QUOTE format")
-        base, _ = parts
-        if base not in self.SUPPORTED_CURRENCIES:
-            raise ValidationError(f"Unsupported crypto asset: {base}")
+    def __bool__(self) -> bool:
+        return self.is_valid
 
-    def _validate_numeric(self, val: Any, field: str) -> None:
-        try:
-            num = float(val)
-            if num <= 0:
-                raise ValidationError(f"Field '{field}' must be strictly positive")
-        except (ValueError, TypeError):
-            raise ValidationError(f"Field '{field}' must be a valid number")
+    def __repr__(self) -> str:
+        verdict = "APPROVED" if self.is_valid else "REJECTED"
+        return f"<{self.checkpoint} Verdict: {self.target} ({verdict})>"
 
-    def _validate_non_empty_string(self, val: Any, field: str) -> None:
-        if not isinstance(val, str) or not val.strip():
-            raise ValidationError(f"Field '{field}' must be a non-empty string")
 
-    def validate_payload(self, payload: Dict[str, Any]) -> Dict[str, Any]:
-        """Validates dynamic market tracking payloads and returns normalized structures."""
-        if not isinstance(payload, dict):
-            raise ValidationError("Payload must be a dictionary")
-        
-        missing = self.REQUIRED_KEYS - payload.keys()
-        if missing:
-            raise ValidationError(f"Missing mandatory payload keys: {missing}")
+def validate_ticker(ticker: str) -> ValidationVerdict[str]:
+    """Validates if a ticker symbol fits the chaotic energy of crypto pairings.
 
-        cleaned = {}
-        for key, validator in self.rules.items():
-            validator(payload[key])
-            cleaned[key] = float(payload[key]) if key in ("price", "volume") else str(payload[key]).strip()
-        return cleaned
+    Must be 2 to 10 uppercase chars, optionally paired (e.g., BTC/USDT).
+    """
+    rule = re.compile(r"^[A-Z0-9]{2,10}(/[A-Z0-9]{2,10})?$")
+    status = bool(rule.match(ticker))
+    return ValidationVerdict(ticker, status, "Asset Ticker")
+
+
+def validate_address(address: str) -> ValidationVerdict[str]:
+    """Heuristically dissects a string to determine if it mimics a wallet address.
+
+    Supports standard EVM hexadecimal networks and basic Bitcoin formats.
+    """
+    is_evm = (
+        address.startswith("0x")
+        and len(address) == 42
+        and all(char in "0123456789abcdefABCDEF" for char in address[2:])
+    )
+    is_btc = (
+        address.startswith(("1", "3", "bc1")) and 26 <= len(address) <= 62
+    )
+    return ValidationVerdict(address, is_evm or is_btc, "Crypto Address")
+
+
+def screen_batch(
+    candidates: Iterable[str],
+    heuristic: Callable[[str], ValidationVerdict[str]],
+) -> list[ValidationVerdict[str]]:
+    """Processes a swarm of candidates through the designated validator filter."""
+    return [heuristic(candidate) for candidate in candidates]
