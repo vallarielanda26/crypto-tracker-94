@@ -1,33 +1,60 @@
+import sys
 import logging
-from logging.handlers import RotatingFileHandler
-import os
-from datetime import datetime
+import re
+from typing import Any, Dict
 
-class CryptoFormatter(logging.Formatter):
-    def format(self, record):
-        record.msg = f"[{datetime.now().isoformat()}] {record.msg}"
-        return super().format(record)
+class SafeCryptoLogger:
+    """Resilient logging wrapper that handles edge cases like sensitive key leakage,
+    formatting failures, and output stream degradation.
+    """
+    API_KEY_PATTERN = re.compile(r'(?i)(api[-_]?key|secret|bearer)\s*[:=]\s*["\\']?([a-zA-Z0-9_\-]+)["\\']?')
 
-def setup_logger(name='crypto-tracker-94', log_file='tracker.log'):
-    os.makedirs('logs', exist_ok=True)
-    path = os.path.join('logs', log_file)
-    
-    logger = logging.getLogger(name)
-    logger.setLevel(logging.INFO)
-    
-    if not logger.handlers:
-        handler = RotatingFileHandler(
-            path, 
-            maxBytes=1024 * 1024 * 5, 
-            backupCount=3
-        )
-        handler.setFormatter(CryptoFormatter('%(levelname)s: %(message)s'))
-        logger.addHandler(handler)
-        
-        console = logging.StreamHandler()
-        console.setFormatter(CryptoFormatter('%(message)s'))
-        logger.addHandler(console)
-    
-    return logger
+    def __init__(self, name: str = "crypto_tracker", log_file: str = "tracker.log"):
+        self.logger = logging.getLogger(name)
+        self.logger.setLevel(logging.INFO)
+        self._setup_handlers(log_file)
 
-logger = setup_logger()
+    def _setup_handlers(self, log_file: str) -> None:
+        formatter = logging.Formatter('[%(asctime)s] %(levelname)s - %(message)s')
+        try:
+            file_handler = logging.FileHandler(log_file, encoding='utf-8')
+            file_handler.setFormatter(formatter)
+            self.logger.addHandler(file_handler)
+        except (PermissionError, OSError) as e:
+            sys.stderr.write(f"Fallback warning: Failed to create file log handler: {e}\
+")
+
+        stream_handler = logging.StreamHandler(sys.stdout)
+        stream_handler.setFormatter(formatter)
+        self.logger.addHandler(stream_handler)
+
+    def _sanitize(self, msg: Any) -> str:
+        try:
+            text = str(msg)
+            return self.API_KEY_PATTERN.sub(r'\1=***REDACTED***', text)
+        except Exception:
+            return "<unformattable log message>"
+
+    def log_event(self, level: int, msg: Any, *args: Any, **kwargs: Any) -> None:
+        try:
+            clean_msg = self._sanitize(msg)
+            if args:
+                clean_args = tuple(self._sanitize(a) for a in args)
+                self.logger.log(level, clean_msg, *clean_args, **kwargs)
+            else:
+                self.logger.log(level, clean_msg, **kwargs)
+        except Exception as err:
+            try:
+                sys.stderr.write(f"[LOGGER EMERGENCY] Failed to write log: {err}\
+")
+            except Exception:
+                pass
+
+    def info(self, msg: Any, *args: Any) -> None:
+        self.log_event(logging.INFO, msg, *args)
+
+    def error(self, msg: Any, *args: Any) -> None:
+        self.log_event(logging.ERROR, msg, *args)
+
+    def warn(self, msg: Any, *args: Any) -> None:
+        self.log_event(logging.WARNING, msg, *args)
