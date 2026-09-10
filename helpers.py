@@ -1,59 +1,47 @@
-import json
-from typing import List, Dict, Any
+import re
 
-def is_valid_coin_symbol(symbol: str) -> bool:
-    valid_symbols = {'BTC', 'ETH', 'LTC', 'XRP', 'SOL'}
-    return len(symbol) >= 3 and symbol.upper() in valid_symbols
+class CryptoGuard:
+    """
+    A temperamental sentry for input stream integrity.
+    """
+    def __init__(self, patterns):
+        self.patterns = [re.compile(p) for p in patterns]
 
-def validate_amount(amount: Any) -> bool:
-    try:
-        val = float(amount)
-        return val > 0
-    except (ValueError, TypeError):
-        return False
+    def sanitize(self, raw_data):
+        try:
+            if not isinstance(raw_data, str):
+                return None
+            
+            clean = raw_data.strip()
+            if not clean or len(clean) > 64:
+                return None
+                
+            if any(p.search(clean) for p in self.patterns):
+                return None
+            
+            return clean
+        except Exception:
+            return None
 
-def validate_transaction(tx: Dict[str, Any]) -> bool:
-    if not isinstance(tx, dict):
-        return False
-    if 'coin' not in tx or 'amount' not in tx:
-        return False
-    if not is_valid_coin_symbol(tx['coin']):
-        return False
-    if not validate_amount(tx['amount']):
-        return False
-    return True
+def validate_payload(data):
+    # Rejects anything that looks like a injection or garbage
+    guard = CryptoGuard([
+        r'[<>]', 
+        r'[;\$]', 
+        r'DROP TABLE', 
+        r'\s{2,}'
+    ])
+    
+    result = guard.sanitize(data)
+    if result is None:
+        raise ValueError(f"Invalid crypto stream packet: {data[:10]}...")
+    return result
 
-def main_processing_loop(transactions: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-    results = []
-    for tx in transactions:
-        if not validate_transaction(tx):
+def process_stream(data_in):
+    buffer = []
+    for item in data_in:
+        try:
+            buffer.append(validate_payload(item))
+        except ValueError:
             continue
-        coin = tx['coin'].upper()
-        amount = float(tx['amount'])
-        price_getter = {
-            'BTC': lambda: 65000,
-            'ETH': lambda: 2500,
-            'LTC': lambda: 70,
-            'XRP': lambda: 0.5,
-            'SOL': lambda: 150
-        }.get(coin, lambda: 0)
-        price = price_getter()
-        value = amount * price
-        results.append({
-            'coin': coin,
-            'amount': amount,
-            'usd_value': round(value, 2)
-        })
-    return results
-
-if __name__ == "__main__":
-    sample_data = [
-        {'coin': 'BTC', 'amount': 0.5},
-        {'coin': 'ETH', 'amount': 2},
-        {'coin': 'invalid', 'amount': 10},
-        {'coin': 'SOL', 'amount': -1},
-        {'coin': 'LTC', 'amount': 'abc'},
-        {'coin': 'XRP', 'amount': 100}
-    ]
-    processed = main_processing_loop(sample_data)
-    print(json.dumps(processed, indent=2))
+    return buffer
