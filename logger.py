@@ -1,58 +1,40 @@
-import sys
-from datetime import datetime
-from typing import Literal, Union, Dict, Any, Final
+import logging
+import functools
+import time
+from typing import Callable, Any
 
-EMOJI_MAP: Final[Dict[str, str]] = {
-    "INFO": "ℹ️",
-    "PUMP": "🚀",
-    "DUMP": "📉",
-    "WARN": "⚠️",
-    "ERROR": "🚨"
-}
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - [crypto-tracker-94] - %(levelname)s - %(message)s')
+logger = logging.getLogger('crypto_monitor')
 
-class CryptoLogger:
-    """
-    A specialized console logger for tracking cryptocurrency market movements.
-    Injects market sentiment indicators and formats telemetry data.
-    """
-    def __init__(self, service_name: str) -> None:
-        """Initializes the logger with a specific tracker service context."""
-        self.service_name: str = service_name
+class CryptoError(Exception):
+    """Custom exception for crypto-tracker-94 anomalies."""
+    pass
 
-    def _format_message(
-        self, 
-        level: str, 
-        msg: str, 
-        trend: Union[Literal["UP", "DOWN", "FLAT"], None]
-    ) -> str:
-        """Formats the log string with timestamps, service name, and emojis."""
-        timestamp: str = datetime.utcnow().isoformat()
-        emoji: str = EMOJI_MAP.get(level, "📝")
-        trend_indicator: str = f" [{trend}]" if trend else ""
-        return f"[{timestamp}] [{self.service_name}] {emoji} {level}{trend_indicator}: {msg}"
+def fault_tolerant_operation(retries: int = 3, delay: float = 1.0):
+    def decorator(func: Callable):
+        @functools.wraps(func)
+        def wrapper(*args: Any, **kwargs: Any) -> Any:
+            attempts = 0
+            while attempts < retries:
+                try:
+                    return func(*args, **kwargs)
+                except (ConnectionError, TimeoutError) as e:
+                    attempts += 1
+                    logger.warning(f"Attempt {attempts} failed: {e}. Retrying...")
+                    if attempts == retries:
+                        logger.error("Max retries reached. Escalating to emergency shutdown.")
+                        raise CryptoError("Persistent network failure")
+                    time.sleep(delay * attempts)
+                except Exception as e:
+                    logger.critical(f"Unrecoverable error in {func.__name__}: {e}")
+                    raise
+        return wrapper
+    return decorator
 
-    def log(
-        self, 
-        message: str, 
-        level: Literal["INFO", "PUMP", "DUMP", "WARN", "ERROR"] = "INFO",
-        trend: Union[Literal["UP", "DOWN", "FLAT"], None] = None,
-        payload: Union[Dict[str, Any], None] = None
-    ) -> None:
-        """
-        Emits a structured log line to stdout/stderr.
-
-        :param message: Main descriptive log message.
-        :param level: Urgency or semantic category of the event.
-        :param trend: Market movement direction helper.
-        :param payload: Contextual key-value pairs of tracking data.
-        """
-        formatted_msg = self._format_message(level, message, trend)
-        if payload:
-            formatted_msg += f" | Telemetry: {payload}"
-
-        if level in ("WARN", "ERROR"):
-            sys.stderr.write(formatted_msg + "\n")
-            sys.stderr.flush()
-        else:
-            sys.stdout.write(formatted_msg + "\n")
-            sys.stdout.flush()
+def log_execution(func: Callable) -> Callable:
+    @functools.wraps(func)
+    def wrapper(*args, **kwargs):
+        logger.info(f"Executing {func.__name__} with {args}")
+        result = func(*args, **kwargs)
+        return result
+    return wrapper
