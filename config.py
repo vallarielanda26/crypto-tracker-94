@@ -1,66 +1,70 @@
-import os
 import json
-from collections import ChainMap
-from typing import Any, Dict
+import os
+from pathlib import Path
+from typing import Any, Dict, NamedTuple
 
-DEFAULT_CONFIG: Dict[str, Any] = {
-    "currency": "USD",
-    "update_interval_sec": 15,
-    "tracked_assets": ["BTC", "ETH", "SOL"],
-    "rpc_nodes": {
-        "ETH": "https://eth-mainnet.public.blastapi.io",
+
+class CryptoConfigDefaults(NamedTuple):
+    fiat_currency: str = "USD"
+    poll_interval_sec: int = 15
+    gas_price_threshold_gwei: float = 50.0
+    tracked_assets: tuple = ("BTC", "ETH", "SOL")
+    enable_websocket: bool = True
+    rpc_endpoints: dict = {
+        "ETH": "https://eth-mainnet.g.alchemy.com/v2/demo",
         "SOL": "https://api.mainnet-beta.solana.com",
-    },
-    "alert_threshold_pct": 5.0,
-    "max_retries": 3,
-}
+    }
 
 
-class DynamicConfig:
-    """Flexible configuration proxy with chain-map fallback and env overrides."""
+class ConfigLoader:
+    """Cascade configuration loader using environment overrides and dynamic type coercion."""
 
-    def __init__(self, filepath: str | None = None):
-        self._file_defaults = self._load_file(filepath) if filepath else {}
-        self._env_defaults = self._load_env()
+    ENV_PREFIX = "CRYPTO_"
 
-    def _load_file(self, path: str) -> Dict[str, Any]:
-        if os.path.exists(path):
-            with open(path, "r", encoding="utf-8") as f:
-                return json.load(f)
-        return {}
+    def __init__(self, config_path: str | Path | None = None):
+        self._defaults = CryptoConfigDefaults()._asdict()
+        self._file_config = self._load_file(config_path) if config_path else {}
+        self._cached_config: Dict[str, Any] = {}
+        self._build()
 
-    def _load_env(self) -> Dict[str, Any]:
-        env_map = {}
-        prefix = "CRYPTO_"
-        for key, val in os.environ.items():
-            if key.startswith(prefix):
-                clean_key = key[len(prefix) :].lower()
-                try:
-                    env_map[clean_key] = json.loads(val)
-                except (json.JSONDecodeError, TypeError):
-                    env_map[clean_key] = val
-        return env_map
+    def _load_file(self, path: str | Path) -> Dict[str, Any]:
+        p = Path(path)
+        if not p.exists():
+            return {}
+        with p.open("r", encoding="utf-8") as f:
+            return json.load(f)
 
-    @property
-    def combined(self) -> ChainMap:
-        return ChainMap(self._env_defaults, self._file_defaults, DEFAULT_CONFIG)
+    def _cast_env_val(self, val: str, default_val: Any) -> Any:
+        if isinstance(default_val, bool):
+            return val.lower() in ("true", "1", "yes")
+        if isinstance(default_val, int):
+            return int(val)
+        if isinstance(default_val, float):
+            return float(val)
+        if isinstance(default_val, tuple):
+            return tuple(x.strip() for x in val.split(",") if x.strip())
+        if isinstance(default_val, dict):
+            try:
+                return json.loads(val)
+            except json.JSONDecodeError:
+                return default_val
+        return val
 
-    def get(self, key: str, fallback: Any = None) -> Any:
-        return self.combined.get(key, fallback)
+    def _build(self) -> None:
+        merged = {**self._defaults, **self._file_config}
+        for key, default_val in self._defaults.items():
+            env_key = f"{self.ENV_PREFIX}{key.upper()}"
+            if env_key in os.environ:
+                merged[key] = self._cast_env_val(os.environ[env_key], default_val)
+        self._cached_config = merged
 
     def __getattr__(self, name: str) -> Any:
-        if name in self.combined:
-            return self.combined[name]
-        raise AttributeError(f"Configuration key '{name}' not found")
+        if name in self._cached_config:
+            return self._cached_config[name]
+        raise AttributeError(f"Configuration parameter '{name}' not found")
 
     def __getitem__(self, item: str) -> Any:
-        return self.combined[item]
+        return self._cached_config[item]
 
     def as_dict(self) -> Dict[str, Any]:
-        res = {}
-        for map_ in reversed(self.combined.maps):
-            res.update(map_)
-        return res
-
-
-config = DynamicConfig(os.getenv("CONFIG_PATH", "config.json"))
+        return dict(self._cached_config)
