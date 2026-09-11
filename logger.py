@@ -1,60 +1,58 @@
 import sys
-import logging
-import re
-from typing import Any, Dict
+from datetime import datetime
+from typing import Literal, Union, Dict, Any, Final
 
-class SafeCryptoLogger:
-    """Resilient logging wrapper that handles edge cases like sensitive key leakage,
-    formatting failures, and output stream degradation.
+EMOJI_MAP: Final[Dict[str, str]] = {
+    "INFO": "ℹ️",
+    "PUMP": "🚀",
+    "DUMP": "📉",
+    "WARN": "⚠️",
+    "ERROR": "🚨"
+}
+
+class CryptoLogger:
     """
-    API_KEY_PATTERN = re.compile(r'(?i)(api[-_]?key|secret|bearer)\s*[:=]\s*["\\']?([a-zA-Z0-9_\-]+)["\\']?')
+    A specialized console logger for tracking cryptocurrency market movements.
+    Injects market sentiment indicators and formats telemetry data.
+    """
+    def __init__(self, service_name: str) -> None:
+        """Initializes the logger with a specific tracker service context."""
+        self.service_name: str = service_name
 
-    def __init__(self, name: str = "crypto_tracker", log_file: str = "tracker.log"):
-        self.logger = logging.getLogger(name)
-        self.logger.setLevel(logging.INFO)
-        self._setup_handlers(log_file)
+    def _format_message(
+        self, 
+        level: str, 
+        msg: str, 
+        trend: Union[Literal["UP", "DOWN", "FLAT"], None]
+    ) -> str:
+        """Formats the log string with timestamps, service name, and emojis."""
+        timestamp: str = datetime.utcnow().isoformat()
+        emoji: str = EMOJI_MAP.get(level, "📝")
+        trend_indicator: str = f" [{trend}]" if trend else ""
+        return f"[{timestamp}] [{self.service_name}] {emoji} {level}{trend_indicator}: {msg}"
 
-    def _setup_handlers(self, log_file: str) -> None:
-        formatter = logging.Formatter('[%(asctime)s] %(levelname)s - %(message)s')
-        try:
-            file_handler = logging.FileHandler(log_file, encoding='utf-8')
-            file_handler.setFormatter(formatter)
-            self.logger.addHandler(file_handler)
-        except (PermissionError, OSError) as e:
-            sys.stderr.write(f"Fallback warning: Failed to create file log handler: {e}\
-")
+    def log(
+        self, 
+        message: str, 
+        level: Literal["INFO", "PUMP", "DUMP", "WARN", "ERROR"] = "INFO",
+        trend: Union[Literal["UP", "DOWN", "FLAT"], None] = None,
+        payload: Union[Dict[str, Any], None] = None
+    ) -> None:
+        """
+        Emits a structured log line to stdout/stderr.
 
-        stream_handler = logging.StreamHandler(sys.stdout)
-        stream_handler.setFormatter(formatter)
-        self.logger.addHandler(stream_handler)
+        :param message: Main descriptive log message.
+        :param level: Urgency or semantic category of the event.
+        :param trend: Market movement direction helper.
+        :param payload: Contextual key-value pairs of tracking data.
+        """
+        formatted_msg = self._format_message(level, message, trend)
+        if payload:
+            formatted_msg += f" | Telemetry: {payload}"
 
-    def _sanitize(self, msg: Any) -> str:
-        try:
-            text = str(msg)
-            return self.API_KEY_PATTERN.sub(r'\1=***REDACTED***', text)
-        except Exception:
-            return "<unformattable log message>"
-
-    def log_event(self, level: int, msg: Any, *args: Any, **kwargs: Any) -> None:
-        try:
-            clean_msg = self._sanitize(msg)
-            if args:
-                clean_args = tuple(self._sanitize(a) for a in args)
-                self.logger.log(level, clean_msg, *clean_args, **kwargs)
-            else:
-                self.logger.log(level, clean_msg, **kwargs)
-        except Exception as err:
-            try:
-                sys.stderr.write(f"[LOGGER EMERGENCY] Failed to write log: {err}\
-")
-            except Exception:
-                pass
-
-    def info(self, msg: Any, *args: Any) -> None:
-        self.log_event(logging.INFO, msg, *args)
-
-    def error(self, msg: Any, *args: Any) -> None:
-        self.log_event(logging.ERROR, msg, *args)
-
-    def warn(self, msg: Any, *args: Any) -> None:
-        self.log_event(logging.WARNING, msg, *args)
+        if level in ("WARN", "ERROR"):
+            sys.stderr.write(formatted_msg + "\n")
+            sys.stderr.flush()
+        else:
+            sys.stdout.write(formatted_msg + "\n")
+            sys.stdout.flush()
