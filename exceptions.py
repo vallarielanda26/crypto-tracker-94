@@ -1,47 +1,35 @@
-import functools
-import time
-import logging
+from typing import Optional, Any, Dict
+from datetime import datetime
 
 class CryptoTrackerError(Exception):
-    """Base exception for crypto-tracker-94."""
-    pass
+    """Base exception for the crypto-tracker-94 engine with dynamic diagnostic payload."""
 
-class RateLimitExceeded(CryptoTrackerError):
-    """Raised when API velocity exceeds limits."""
-    pass
+    def __init__(self, message: str, symbol: Optional[str] = None, payload: Optional[Dict[str, Any]] = None) -> None:
+        self.timestamp: datetime = datetime.utcnow()
+        self.symbol: Optional[str] = symbol
+        self.payload: Dict[str, Any] = payload or {}
+        super().__init__(self._format_message(message))
 
-class DataConsistencyError(CryptoTrackerError):
-    """Raised when ticker values drift beyond reasonable thresholds."""
-    pass
+    def _format_message(self, msg: str) -> str:
+        symbol_prefix = f"[{self.symbol}] " if self.symbol else ""
+        return f"🚨 {self.timestamp.isoformat()} | {symbol_prefix}{msg}"
 
-def fast_fail(retries=3, backoff=0.1):
-    """Decorator for circuit breaking and exponential backoff."""
-    def decorator(func):
-        @functools.wraps(func)
-        def wrapper(*args, **kwargs):
-            last_ex = None
-            for attempt in range(retries):
-                try:
-                    return func(*args, **kwargs)
-                except (ConnectionError, RateLimitExceeded) as e:
-                    last_ex = e
-                    time.sleep(backoff * (2 ** attempt))
-            logging.error(f"Execution failed after {retries} attempts")
-            raise last_ex
-        return wrapper
-    return decorator
 
-def memory_efficient_cache(max_size=128):
-    """Decorator implementing pseudo-LRU caching for core ticker lookups."""
-    cache = {}
-    def decorator(func):
-        @functools.wraps(func)
-        def wrapper(*args, **kwargs):
-            key = str(args) + str(kwargs)
-            if key not in cache:
-                if len(cache) >= max_size:
-                    cache.pop(next(iter(cache)))
-                cache[key] = func(*args, **kwargs)
-            return cache[key]
-        return wrapper
-    return decorator
+class VolatilityOverflowError(CryptoTrackerError):
+    """Raised when the price movement exceeds the pre-calculated panic threshold."""
+
+    def __init__(self, symbol: str, threshold: float, actual: float) -> None:
+        self.threshold: float = threshold
+        self.actual: float = actual
+        msg = f"Market volatility overload! Expected deviation < {threshold}%, but got {actual}%"
+        super().__init__(message=msg, symbol=symbol, payload={"threshold": threshold, "actual": actual})
+
+
+class RugPullWarning(CryptoTrackerError):
+    """Raised when a potential rug-pull signature is detected (sudden liquidity drain)."""
+
+    def __init__(self, token_address: str, remaining_liquidity: float) -> None:
+        self.token_address: str = token_address
+        self.remaining_liquidity: float = remaining_liquidity
+        msg = f"Suspicious liquidity migration detected at {token_address}. Liquidity dropped to {remaining_liquidity} USD!"
+        super().__init__(message=msg, symbol="TOKEN", payload={"address": token_address, "liquidity": remaining_liquidity})
